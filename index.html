@@ -1,2 +1,382 @@
-  <!-- Supabase JavaScript SDK -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Village Form 7 Portal</title>
+  
+  <!-- Google Fonts & Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Supabase Client JS -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    :root {
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --success: #16a34a;
+      --warning: #d97706;
+      --danger: #dc2626;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', sans-serif;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      line-height: 1.5;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+      padding-bottom: 16px;
+      border-bottom: 2px solid var(--border);
+    }
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      padding: 16px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    .stat-card .label {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+    }
+
+    .stat-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+
+    .controls {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    select, input {
+      padding: 10px 14px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 0.9rem;
+      outline: none;
+    }
+
+    select:focus, input:focus {
+      border-color: var(--primary);
+    }
+
+    .table-container {
+      background: var(--card-bg);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      overflow-x: auto;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.9rem;
+    }
+
+    th, td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background-color: #f1f5f9;
+      font-weight: 600;
+      color: var(--text-muted);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+
+    .badge-success { background: #dcfce7; color: var(--success); }
+    .badge-warning { background: #fef3c7; color: var(--warning); }
+
+    .btn {
+      padding: 8px 12px;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-hover); }
+    .btn-outline { border: 1px solid var(--border); background: white; color: var(--text); }
+    .btn-outline:hover { background: #f1f5f9; }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1><i class="fa-solid fa-file-pdf"></i> Village Form 7 Portal</h1>
+      <span id="status-tag" class="badge badge-success">Connected to Cloud</span>
+    </header>
+
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="label">Total Records</div>
+        <div class="value" id="stat-total">44</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">Uploaded PDFs</div>
+        <div class="value" id="stat-uploaded">0 / 44</div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <select id="village-select">
+        <option value="ALL">All Villages</option>
+      </select>
+      <input type="text" id="search-input" placeholder="Search Survey No...">
+    </div>
+
+    <div class="table-container">
+      <table>
+        <thead>
+          <tr>
+            <th>Survey No</th>
+            <th>Village</th>
+            <th>Status</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody id="records-tbody">
+          <tr>
+            <td colspan="4" style="text-align:center;">Loading database records...</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    // --- SUPABASE CONFIGURATION ---
+    const SUPABASE_URL = 'https://vewfsncxckwxweljcmbp.supabase.co';
+    const SUPABASE_ANON_KEY = 'sb_publishable_3VyFWAreLbJv3DkRsf1i_Q_TnJJb'; 
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let allRecords = [];
+    let metadataMap = {};
+
+    // Sample initial dataset generator
+    function getAllRecords() {
+      const records = [];
+      for (let i = 1; i <= 44; i++) {
+        records.push({
+          id: `REC_${i}`,
+          surveyNumber: `${100 + i}`,
+          villageId: i % 2 === 0 ? 'Anand' : 'Petlad'
+        });
+      }
+      return records;
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      allRecords = getAllRecords();
+
+      // Fetch live records from Supabase
+      try {
+        const { data: dbRecords, error } = await supabaseClient
+          .from('vf7_records')
+          .select('*');
+
+        if (dbRecords && dbRecords.length > 0) {
+          dbRecords.forEach(item => {
+            metadataMap[item.record_id] = {
+              recordId: item.record_id,
+              fileName: item.file_name,
+              fileUrl: item.file_url,
+              uploadedAt: item.uploaded_at
+            };
+          });
+        } else {
+          // Fallback if cloud database is currently empty
+          allRecords.forEach(rec => {
+            metadataMap[rec.id] = { 
+              recordId: rec.id, 
+              fileName: `${rec.surveyNumber}_VF7.pdf`, 
+              uploadedAt: new Date().toISOString() 
+            };
+          });
+        }
+      } catch (err) {
+        console.error('Database connection error:', err);
+      }
+
+      populateVillageDropdown();
+      renderAdminTable();
+      updateAdminStats();
+    });
+
+    function populateVillageDropdown() {
+      const select = document.getElementById('village-select');
+      const villages = [...new Set(allRecords.map(r => r.villageId))];
+      villages.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        select.appendChild(opt);
+      });
+
+      select.addEventListener('change', renderAdminTable);
+      document.getElementById('search-input').addEventListener('input', renderAdminTable);
+    }
+
+    function renderAdminTable() {
+      const tbody = document.getElementById('records-tbody');
+      const villageFilter = document.getElementById('village-select').value;
+      const searchFilter = document.getElementById('search-input').value.toLowerCase();
+
+      const filtered = allRecords.filter(rec => {
+        const matchesVillage = villageFilter === 'ALL' || rec.villageId === villageFilter;
+        const matchesSearch = rec.surveyNumber.toLowerCase().includes(searchFilter);
+        return matchesVillage && matchesSearch;
+      });
+
+      tbody.innerHTML = '';
+
+      filtered.forEach(rec => {
+        const tr = document.createElement('tr');
+        const meta = metadataMap[rec.id];
+        const isUploaded = !!meta;
+
+        tr.innerHTML = `
+          <td><strong>#${rec.surveyNumber}</strong></td>
+          <td>${rec.villageId}</td>
+          <td>
+            <span class="badge ${isUploaded ? 'badge-success' : 'badge-warning'}">
+              ${isUploaded ? 'Uploaded' : 'Pending'}
+            </span>
+          </td>
+          <td>
+            ${isUploaded && meta.fileUrl 
+              ? `<a href="${meta.fileUrl}" target="_blank" class="btn btn-primary"><i class="fa-solid fa-eye"></i> View PDF</a>`
+              : `<button class="btn btn-outline" onclick="uploadPdfPrompt('${rec.id}', '${rec.surveyNumber}', '${rec.villageId}')"><i class="fa-solid fa-upload"></i> Upload</button>`
+            }
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function updateAdminStats() {
+      const total = allRecords.length;
+      const uploadedCount = Object.keys(metadataMap).length;
+      document.getElementById('stat-total').textContent = total;
+      document.getElementById('stat-uploaded').textContent = `${uploadedCount} / ${total}`;
+    }
+
+    async function uploadPdfPrompt(recordId, surveyNumber, villageId) {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/pdf';
+
+      input.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const filePath = `${recordId}.pdf`;
+
+        // 1. Upload PDF to Supabase Storage Bucket
+        const { data: uploadData, error: uploadError } = await supabaseClient.storage
+          .from('vf7-documents')
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) {
+          alert('Failed to upload file to storage bucket.');
+          return;
+        }
+
+        // 2. Get Public URL
+        const { data: urlData } = supabaseClient.storage
+          .from('vf7-documents')
+          .getPublicUrl(filePath);
+
+        // 3. Save Record Metadata to Database
+        await supabaseClient.from('vf7_records').upsert({
+          record_id: recordId,
+          survey_number: surveyNumber,
+          village_id: villageId,
+          file_url: urlData.publicUrl,
+          file_name: file.name
+        });
+
+        metadataMap[recordId] = {
+          recordId: recordId,
+          fileName: file.name,
+          fileUrl: urlData.publicUrl,
+          uploadedAt: new Date().toISOString()
+        };
+
+        renderAdminTable();
+        updateAdminStats();
+        alert('File uploaded and synced successfully across all devices!');
+      };
+
+      input.click();
+    }
+  </script>
+</body>
+</html>

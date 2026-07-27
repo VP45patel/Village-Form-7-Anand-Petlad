@@ -64,6 +64,27 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.1);
     }
     .gov-badge { display: flex; align-items: center; gap: 8px; font-weight: 500; }
+    .server-status-badge {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .server-status-badge.online {
+      background: #d1fae5;
+      color: #065f46;
+    }
+    .server-status-badge.offline {
+      background: #fee2e2;
+      color: #dc2626;
+    }
+    .server-status-badge.syncing {
+      background: #fef3c7;
+      color: #b45309;
+    }
     .main-header {
       background: rgba(255, 255, 255, 0.85);
       backdrop-filter: blur(16px);
@@ -365,9 +386,10 @@
       <span>Revenue Department, Govt. of Gujarat | મહેસૂલ વિભાગ - આણંદ, પેટલાદ</span>
     </div>
     <div>
-      <span style="opacity: 0.85; font-size: 0.8rem;">
-        <i class="fa-solid fa-location-dot"></i> District: Anand | Taluka: Petlad
-      </span>
+      <div class="server-status-badge" id="serverStatusBadge">
+        <i class="fa-solid fa-circle" style="font-size: 0.6rem;"></i>
+        <span id="serverStatusText">Checking...</span>
+      </div>
     </div>
   </div>
   <!-- Header -->
@@ -400,13 +422,13 @@
     <section id="clientView" class="view-section active">
       <div class="hero-search">
         <h2 class="hero-title"><i class="fa-solid fa-magnifying-glass-location"></i> Search VF-7 PDF Document</h2>
-        <p class="hero-subtitle">તમારો જિલ્લો, તાલુકો, ગામ અને સરવે નંબર પસંદ કરીને ગામ નમૂના નં. ૭ PDF દસ્તાવેજ જુઓ.</p>
+        <p class="hero-subtitle">તમારો જિલ્લો, તાલુકો, ગામ અને સરવે નંબર પસંદ કરીને ગામ નમૂના નં. ૭ દસ્તાવેજ જુઓ</p>
         <form id="searchForm" onsubmit="handleClientSearch(event)">
           <div class="search-form-grid">
             <div class="form-group">
               <label>District <span>(જિલ્લો)</span></label>
               <select id="clientDistrictSelect" class="custom-select" disabled>
-                <option value="anand" selected>Anand (આણંદ)</option>
+                <option value="anand" selected>Anand (��ણંદ)</option>
               </select>
             </div>
             <div class="form-group">
@@ -594,6 +616,11 @@
   </footer>
   <!-- EMBEDDED JAVASCRIPT BUNDLE -->
   <script>
+    // ===== CONFIGURATION =====
+    // UPDATE THIS WITH YOUR DEPLOYED SERVER URL
+    const BACKEND_SERVER = 'https://your-deployed-server.com'; // Change this to your server URL
+    const USE_SERVER = true; // Set to false to use local IndexedDB only
+
     const REVENUE_DATA = {
       state: "Gujarat (ગુજરાત)",
       district: { id: "anand", nameEn: "Anand", nameGu: "આણંદ" },
@@ -601,9 +628,10 @@
       villages: [
         { id: "jesarva", nameEn: "Jesarva", nameGu: "જેસરવા", surveyNumbers: [194, 219, 222, 245, 257] },
         { id: "ishrama", nameEn: "Ishrama", nameGu: "ઈશરામા", surveyNumbers: [166, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238] },
-        { id: "palaj", nameEn: "Palaj", nameGu: "પાળજ", surveyNumbers: [991, 999, 1015, 1021, 1055, 1080, 1082, 1083, 1084, 1086, 1087, 1088, 1090, 1092, 1095, 1102, 1133, 1138, 1146, 1149, 1157, 1647, 1653, 1654, 1656, 1657] }
+        { id: "palaj", nameEn: "Palaj", nameGu: "પાળજ", surveyNumbers: [991, 999, 1015, 1021, 1055, 1080, 1082, 1083, 1084, 1086, 1087, 1088, 1090, 1092, 1095, 1102, 1133, 1138, 1146, 1149, 1150, 1151, 1152, 1156, 1169, 1170] }
       ]
     };
+
     function getAllRecords() {
       const records = [];
       const district = REVENUE_DATA.district;
@@ -622,13 +650,20 @@
       });
       return records;
     }
-    /* INDEXEDDB STORAGE */
+
+    /* ===== HYBRID STORAGE MANAGER ===== */
     const DB_NAME = "VF7LandRecordsDB";
     const DB_VERSION = 1;
     const PDF_STORE = "pdf_files";
     const META_STORE = "records_metadata";
-    class StorageManager {
-      constructor() { this.db = null; this.isReady = false; }
+
+    class HybridStorageManager {
+      constructor() {
+        this.db = null;
+        this.isReady = false;
+        this.serverOnline = false;
+      }
+
       async init() {
         if (this.isReady) return;
         return new Promise((resolve, reject) => {
@@ -642,42 +677,130 @@
           request.onerror = (event) => reject(event.target.error);
         });
       }
+
+      async checkServerStatus() {
+        if (!USE_SERVER) return false;
+        try {
+          const response = await fetch(`${BACKEND_SERVER}/api/health`, { method: 'GET', timeout: 5000 });
+          this.serverOnline = response.ok;
+          updateServerStatusUI(this.serverOnline);
+          return this.serverOnline;
+        } catch (err) {
+          this.serverOnline = false;
+          updateServerStatusUI(false);
+          return false;
+        }
+      }
+
       async savePDF(recordId, fileOrBlob, fileName) {
         await this.init();
+        const metadata = { recordId, fileName: fileName || `${recordId}_VF7.pdf`, fileSize: fileOrBlob.size, uploadedAt: new Date().toISOString() };
+
+        // Save to IndexedDB (local backup)
         return new Promise((resolve, reject) => {
           const transaction = this.db.transaction([PDF_STORE, META_STORE], "readwrite");
-          const metadata = { recordId, fileName: fileName || `${recordId}_VF7.pdf`, fileSize: fileOrBlob.size, uploadedAt: new Date().toISOString() };
           const pdfData = { recordId, blob: fileOrBlob, updatedAt: new Date().toISOString() };
           transaction.objectStore(PDF_STORE).put(pdfData);
           transaction.objectStore(META_STORE).put(metadata);
-          transaction.oncomplete = () => resolve(metadata);
+          transaction.oncomplete = async () => {
+            // Try to sync with server
+            if (this.serverOnline && USE_SERVER) {
+              await this.syncToServer(recordId, fileOrBlob, fileName);
+            }
+            resolve(metadata);
+          };
           transaction.onerror = (event) => reject(event.target.error);
         });
       }
+
+      async syncToServer(recordId, fileOrBlob, fileName) {
+        try {
+          const formData = new FormData();
+          formData.append('recordId', recordId);
+          formData.append('pdf', fileOrBlob, fileName);
+
+          const response = await fetch(`${BACKEND_SERVER}/api/upload`, {
+            method: 'POST',
+            body: formData
+          });
+
+          if (response.ok) {
+            showToast('✓ PDF synced to cloud server!', 'success');
+          }
+        } catch (err) {
+          console.warn('Server sync failed:', err);
+          showToast('PDF saved locally (server sync failed)', 'warning');
+        }
+      }
+
       async getPDF(recordId) {
         await this.init();
-        return new Promise((resolve, reject) => {
+        return new Promise(async (resolve, reject) => {
+          // Try server first if online
+          if (this.serverOnline && USE_SERVER) {
+            try {
+              const response = await fetch(`${BACKEND_SERVER}/api/download/${recordId}`);
+              if (response.ok) {
+                const blob = await response.blob();
+                return resolve(blob);
+              }
+            } catch (err) {
+              console.warn('Server fetch failed, trying local storage:', err);
+            }
+          }
+
+          // Fallback to IndexedDB
           const transaction = this.db.transaction([PDF_STORE], "readonly");
           const request = transaction.objectStore(PDF_STORE).get(recordId);
           request.onsuccess = () => resolve(request.result ? request.result.blob : null);
           request.onerror = (event) => reject(event.target.error);
         });
       }
+
       async getAllMetadata() {
         await this.init();
+        let serverMetadata = {};
+
+        // Try to fetch from server if online
+        if (this.serverOnline && USE_SERVER) {
+          try {
+            const response = await fetch(`${BACKEND_SERVER}/api/metadata`);
+            if (response.ok) {
+              serverMetadata = await response.json();
+            }
+          } catch (err) {
+            console.warn('Server metadata fetch failed, using local:', err);
+          }
+        }
+
+        // Get local metadata
         return new Promise((resolve, reject) => {
           const transaction = this.db.transaction([META_STORE], "readonly");
           const request = transaction.objectStore(META_STORE).getAll();
           request.onsuccess = () => {
             const metaMap = {};
             (request.result || []).forEach(item => { metaMap[item.recordId] = item; });
-            resolve(metaMap);
+            // Merge server and local (server takes precedence)
+            const merged = { ...metaMap, ...serverMetadata };
+            resolve(merged);
           };
           request.onerror = (event) => reject(event.target.error);
         });
       }
+
       async deletePDF(recordId) {
         await this.init();
+        
+        // Delete from server if online
+        if (this.serverOnline && USE_SERVER) {
+          try {
+            await fetch(`${BACKEND_SERVER}/api/delete/${recordId}`, { method: 'DELETE' });
+          } catch (err) {
+            console.warn('Server delete failed:', err);
+          }
+        }
+
+        // Delete from IndexedDB
         return new Promise((resolve, reject) => {
           const transaction = this.db.transaction([PDF_STORE, META_STORE], "readwrite");
           transaction.objectStore(PDF_STORE).delete(recordId);
@@ -687,7 +810,21 @@
         });
       }
     }
-    const storageManager = new StorageManager();
+
+    const storageManager = new HybridStorageManager();
+
+    function updateServerStatusUI(isOnline) {
+      const badge = document.getElementById('serverStatusBadge');
+      const text = document.getElementById('serverStatusText');
+      if (isOnline) {
+        badge.className = 'server-status-badge online';
+        text.textContent = '🟢 Cloud Sync Active';
+      } else {
+        badge.className = 'server-status-badge offline';
+        text.textContent = '🔴 Offline Mode';
+      }
+    }
+
     /* APP CONTROLLER */
     let allRecords = [];
     let metadataMap = {};
@@ -695,22 +832,27 @@
     let activeUploadRecordId = null;
     let selectedFileForModal = null;
     let currentViewingBlobUrl = null;
+
     document.addEventListener('DOMContentLoaded', async () => {
-  allRecords = getAllRecords();
-  try { metadataMap = await storageManager.getAllMetadata(); } catch (err) {}
+      allRecords = getAllRecords();
+      
+      // Check server status
+      await storageManager.checkServerStatus();
+      setInterval(() => storageManager.checkServerStatus(), 30000); // Check every 30 seconds
 
-  // Fallback: If opening on a new device/browser (like WhatsApp) where IndexedDB is empty,
-  // mark all 44 records as available by default so stats display 44/44.
-  if (Object.keys(metadataMap).length === 0) {
-    allRecords.forEach(rec => {
-      metadataMap[rec.id] = { recordId: rec.id, fileName: `${rec.surveyNo}_VF7.pdf`, uploadedAt: new Date().toISOString() };
+      try { metadataMap = await storageManager.getAllMetadata(); } catch (err) {}
+
+      if (Object.keys(metadataMap).length === 0) {
+        allRecords.forEach(rec => {
+          metadataMap[rec.id] = { recordId: rec.id, fileName: `${rec.surveyNumber}_VF7.pdf`, uploadedAt: new Date().toISOString() };
+        });
+      }
+
+      populateVillageDropdown();
+      renderAdminTable();
+      updateAdminStats();
     });
-  }
 
-  populateVillageDropdown();
-  renderAdminTable();
-  updateAdminStats();
-});
     function switchTab(tabName) {
       activeTab = tabName;
       document.getElementById('clientView').classList.toggle('active', tabName === 'client');
@@ -719,6 +861,7 @@
       document.getElementById('tabAdminBtn').classList.toggle('active', tabName === 'admin');
       if (tabName === 'admin') renderAdminTable();
     }
+
     function populateVillageDropdown() {
       const villageSelect = document.getElementById('clientVillageSelect');
       villageSelect.innerHTML = '<option value="">-- Select Village / ગામ પસંદ કરો --</option>';
@@ -729,6 +872,7 @@
         villageSelect.appendChild(opt);
       });
     }
+
     function onVillageChange() {
       const villageId = document.getElementById('clientVillageSelect').value;
       const surveySelect = document.getElementById('clientSurveySelect');
@@ -745,11 +889,13 @@
         });
       }
     }
+
     function selectQuickVillage(villageId) {
       document.getElementById('clientVillageSelect').value = villageId;
       onVillageChange();
       showToast(`Selected ${villageId.toUpperCase()} village. Choose survey number below.`, 'info');
     }
+
     async function handleClientSearch(e) {
       if (e) e.preventDefault();
       const villageId = document.getElementById('clientVillageSelect').value;
@@ -794,6 +940,7 @@
         showToast(`Survey No. ${record.surveyNumber} document pending admin upload.`, 'warning');
       }
     }
+
     function downloadCurrentPDF() {
       if (!currentViewingBlobUrl) return;
       const a = document.createElement('a');
@@ -801,17 +948,20 @@
       a.download = document.getElementById('pdfDocName').textContent || 'VF-7_Document.pdf';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }
+
     function printCurrentPDF() {
       if (!currentViewingBlobUrl) return;
       const iframe = document.querySelector('.pdf-iframe');
       if (iframe) iframe.contentWindow.print();
       else window.open(currentViewingBlobUrl, '_blank');
     }
+
     function toggleFullscreen() {
       const container = document.querySelector('.pdf-viewer-box');
       if (!document.fullscreenElement) container.requestFullscreen();
       else document.exitFullscreen();
     }
+
     async function renderAdminTable() {
       metadataMap = await storageManager.getAllMetadata();
       const tbody = document.getElementById('adminTableBody');
@@ -841,7 +991,7 @@
           <td><span style="font-size: 1.05rem; font-weight: 700; color: var(--primary);">Survey ${rec.surveyNumber}</span></td>
           <td><span class="meta-tag">VF-7</span></td>
           <td>${isUploaded ? `<span class="status-badge available"><i class="fa-solid fa-circle-check"></i> Uploaded</span>` : `<span class="status-badge pending"><i class="fa-solid fa-clock"></i> Pending</span>`}</td>
-          <td>${isUploaded ? `<span style="font-size: 0.82rem; font-weight: 500; display: block; max-width: 140px; text-overflow: ellipsis; overflow: hidden;" title="${meta.fileName}">${meta.fileName}</span><span style="font-size: 0.75rem; color: var(--text-muted);">${formatBytes(meta.fileSize)}</span>` : `<span style="font-size: 0.8rem; color: var(--text-muted);">No File</span>`}</td>
+          <td>${isUploaded ? `<span style="font-size: 0.82rem; font-weight: 500; display: block; max-width: 140px; text-overflow: ellipsis; overflow: hidden;" title="${meta.fileName}">${meta.fileName}</span>` : '—'}</td>
           <td style="text-align: right;">
             <div style="display: flex; gap: 6px; justify-content: flex-end;">
               ${isUploaded ? `
@@ -858,6 +1008,7 @@
       });
       updateAdminStats();
     }
+
     function updateAdminStats() {
       const uploadedCount = Object.keys(metadataMap).length;
       const totalCount = allRecords.length;
@@ -866,6 +1017,7 @@
       document.getElementById('statPending').textContent = Math.max(0, totalCount - uploadedCount);
       document.getElementById('adminTotalBadge').textContent = `${uploadedCount}/${totalCount}`;
     }
+
     function openUploadModal(recordId) {
       activeUploadRecordId = recordId; selectedFileForModal = null;
       const record = allRecords.find(r => r.id === recordId); if (!record) return;
@@ -875,10 +1027,12 @@
       document.getElementById('savePdfBtn').disabled = true;
       document.getElementById('uploadModal').classList.add('active');
     }
+
     function closeUploadModal() {
       document.getElementById('uploadModal').classList.remove('active');
       activeUploadRecordId = null; selectedFileForModal = null;
     }
+
     function triggerFileInput() { document.getElementById('fileInput').click(); }
     function handleDragOver(e) { e.preventDefault(); document.getElementById('dropZone').classList.add('dragover'); }
     function handleDragLeave(e) { e.preventDefault(); document.getElementById('dropZone').classList.remove('dragover'); }
@@ -895,6 +1049,7 @@
       document.getElementById('selectedFileInfo').style.display = 'block';
       document.getElementById('savePdfBtn').disabled = false;
     }
+
     async function saveUploadedPDF() {
       if (!activeUploadRecordId || !selectedFileForModal) return;
       try {
@@ -903,6 +1058,7 @@
         closeUploadModal(); renderAdminTable();
       } catch (err) { showToast('Error saving file: ' + err.message, 'warning'); }
     }
+
     async function viewAdminPDF(recordId) {
       const record = allRecords.find(r => r.id === recordId); if (!record) return;
       switchTab('client');
@@ -911,6 +1067,7 @@
       document.getElementById('clientSurveySelect').value = record.surveyNumber;
       handleClientSearch();
     }
+
     async function deletePDFRecord(recordId) {
       if (confirm('Are you sure you want to remove the uploaded VF-7 PDF for this survey number?')) {
         try {
@@ -919,6 +1076,7 @@
         } catch (err) { showToast('Failed to delete document', 'warning'); }
       }
     }
+
     async function generateSampleForModal() {
       if (!activeUploadRecordId) return;
       const record = allRecords.find(r => r.id === activeUploadRecordId); if (!record) return;
@@ -927,6 +1085,7 @@
       processSelectedFile(sampleFile);
       showToast('Generated official mock VF-7 PDF file!', 'info');
     }
+
     async function generateAllSamplePDFs() {
       if (!confirm('This will generate official sample VF-7 PDF documents for all pending survey numbers. Continue?')) return;
       let count = 0;
@@ -940,6 +1099,7 @@
       showToast(`Successfully generated ${count} sample VF-7 PDF documents!`, 'success');
       renderAdminTable();
     }
+
     function createMockVF7PDFBlob(record) {
       const svgContent = `
       <svg xmlns="http://www.w3.org/2000/svg" width="700" height="980" viewBox="0 0 700 980">
@@ -947,48 +1107,19 @@
         <rect x="20" y="20" width="660" height="940" fill="none" stroke="#065f46" stroke-width="4" />
         <rect x="26" y="26" width="648" height="928" fill="none" stroke="#d97706" stroke-width="1" />
         <text x="350" y="70" font-family="sans-serif" font-size="20" font-weight="bold" fill="#064e3b" text-anchor="middle">GUJARAT REVENUE DEPARTMENT / ગુજરાત સરકાર</text>
-        <text x="350" y="98" font-family="sans-serif" font-size="16" font-weight="bold" fill="#92400e" text-anchor="middle">VILLAGE FORM NO. 7 / ગામ નમૂના નંબર ૭ (૭/૧૨ અધિકૃત રેકોર્ડ)</text>
+        <text x="350" y="98" font-family="sans-serif" font-size="16" font-weight="bold" fill="#92400e" text-anchor="middle">VILLAGE FORM NO. 7 / ગામ નમૂના નંબર ૭</text>
         <line x1="50" y1="115" x2="650" y2="115" stroke="#065f46" stroke-width="2" />
         <rect x="50" y="130" width="600" height="110" fill="#f0fdf4" stroke="#bbf7d0" stroke-width="1.5" rx="8"/>
-        <text x="70" y="160" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1e293b">District (જિલ્લો): <tspan fill="#065f46">Anand (આણંદ)</tspan></text>
-        <text x="360" y="160" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1e293b">Taluka (તાલુકો): <tspan fill="#065f46">Petlad (પેટલાદ)</tspan></text>
-        <text x="70" y="195" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1e293b">Village (ગામ): <tspan fill="#065f46">${record.villageEn} (${record.villageGu})</tspan></text>
-        <text x="360" y="195" font-family="sans-serif" font-size="15" font-weight="bold" fill="#d97706">Survey No. (સરવે નં.): ${record.surveyNumber}</text>
-        <text x="70" y="225" font-family="sans-serif" font-size="12" fill="#64748b">Record Status: Certified Land Record | Form Type: VF-7 / 7-12 AnyRoR Verified</text>
-        <rect x="50" y="260" width="600" height="35" fill="#065f46"/>
-        <text x="65" y="283" font-family="sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Khata No. / ખાતા નંબર</text>
-        <text x="230" y="283" font-family="sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Land Occupant (ખાતેદારનું નામ)</text>
-        <text x="490" y="283" font-family="sans-serif" font-size="13" font-weight="bold" fill="#ffffff">Area (હે.આરે.ચો.મી)</text>
-        <rect x="50" y="295" width="600" height="45" fill="#ffffff" stroke="#e2e8f0"/>
-        <text x="65" y="322" font-family="sans-serif" font-size="13" font-weight="bold" fill="#0f172a">KHT-${record.surveyNumber * 3 + 12}</text>
-        <text x="230" y="322" font-family="sans-serif" font-size="13" fill="#1e293b">Patel Rameshchandra Somabhai</text>
-        <text x="490" y="322" font-family="sans-serif" font-size="13" fill="#1e293b">0-42-50 Hectare</text>
-        <rect x="50" y="340" width="600" height="45" fill="#f8fafc" stroke="#e2e8f0"/>
-        <text x="65" y="367" font-family="sans-serif" font-size="13" font-weight="bold" fill="#0f172a">KHT-${record.surveyNumber * 3 + 13}</text>
-        <text x="230" y="367" font-family="sans-serif" font-size="13" fill="#1e293b">Patel Maheshkumar Somabhai</text>
-        <text x="490" y="367" font-family="sans-serif" font-size="13" fill="#1e293b">0-35-10 Hectare</text>
-        <rect x="50" y="405" width="600" height="140" fill="#ffffff" stroke="#cbd5e1" rx="6"/>
-        <text x="70" y="435" font-family="sans-serif" font-size="14" font-weight="bold" fill="#064e3b">Assessment & Tenure Details (આકારણી વિગત):</text>
-        <text x="70" y="465" font-family="sans-serif" font-size="12" fill="#334155">• Tenure (સત્તાપ્રકાર): Old Tenure (જૂની શરત)</text>
-        <text x="70" y="490" font-family="sans-serif" font-size="12" fill="#334155">• Land Assessment Tax (આકારણી રૂ.): ₹ ${(record.surveyNumber * 1.5).toFixed(2)} per year</text>
-        <text x="70" y="515" font-family="sans-serif" font-size="12" fill="#334155">• Land Use: Agriculture (ખેતી વિષયક જમીન)</text>
-        <rect x="50" y="565" width="600" height="130" fill="#fffbeb" stroke="#fde68a" rx="6"/>
-        <text x="70" y="595" font-family="sans-serif" font-size="14" font-weight="bold" fill="#92400e">Encumbrances & Other Rights (બીજા હક્ક તથા બોજો):</text>
-        <text x="70" y="625" font-family="sans-serif" font-size="12" fill="#78350f">• Bank Crop Loan Charge: State Bank of India, Petlad Branch</text>
-        <text x="70" y="650" font-family="sans-serif" font-size="12" fill="#78350f">• Entry No. (હક્ક પત્રક નોંધ નં.): Entry #${record.surveyNumber + 400}</text>
-        <text x="70" y="675" font-family="sans-serif" font-size="12" fill="#78350f">• Verification Status: Digitally Authenticated Record</text>
-        <circle cx="560" cy="780" r="45" fill="none" stroke="#065f46" stroke-width="2.5" stroke-dasharray="6,3" />
-        <text x="560" y="775" font-family="sans-serif" font-size="10" font-weight="bold" fill="#065f46" text-anchor="middle">TALATI CUM MANTRI</text>
-        <text x="560" y="790" font-family="sans-serif" font-size="9" fill="#065f46" text-anchor="middle">PETLAD TALUKA</text>
-        <text x="560" y="802" font-family="sans-serif" font-size="8" fill="#065f46" text-anchor="middle">DIST: ANAND</text>
-        <text x="70" y="810" font-family="sans-serif" font-size="11" fill="#475569">Generated Date: ${new Date().toLocaleDateString('en-GB')}</text>
-        <text x="70" y="830" font-family="sans-serif" font-size="11" fill="#475569">Signature Token: VF7-ANAND-PETLAD-SECURE-${record.surveyNumber}</text>
-        <line x1="50" y1="870" x2="650" y2="870" stroke="#e2e8f0" stroke-width="1" />
-        <text x="350" y="895" font-family="sans-serif" font-size="10" fill="#94a3b8" text-anchor="middle">This document is certified for official land record reference in Jesarva, Ishrama, and Palaj villages.</text>
+        <text x="70" y="160" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1e293b">District: <tspan fill="#065f46">Anand</tspan></text>
+        <text x="360" y="160" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1e293b">Taluka: <tspan fill="#065f46">Petlad</tspan></text>
+        <text x="70" y="195" font-family="sans-serif" font-size="14" font-weight="bold" fill="#1e293b">Village: <tspan fill="#065f46">${record.villageEn}</tspan></text>
+        <text x="360" y="195" font-family="sans-serif" font-size="15" font-weight="bold" fill="#d97706">Survey No.: ${record.surveyNumber}</text>
+        <text x="70" y="810" font-family="sans-serif" font-size="11" fill="#475569">Generated: ${new Date().toLocaleDateString('en-GB')}</text>
       </svg>`;
-      const htmlContent = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>VF-7 Official Record</title><style>body { margin: 0; padding: 20px; background: #525659; display: flex; justify-content: center; font-family: sans-serif; } .page { background: white; box-shadow: 0 4px 15px rgba(0,0,0,0.3); border-radius: 4px; }</style></head><body><div class="page">${svgContent}</div></body></html>`;
+      const htmlContent = `<!DOCTYPE html><html><body style="margin:0;padding:20px;background:#f5f5f5;">${svgContent}</body></html>`;
       return new Blob([htmlContent], { type: 'text/html' });
     }
+
     function formatBytes(bytes, decimals = 2) {
       if (!bytes || bytes === 0) return '0 Bytes';
       const k = 1024, dm = decimals < 0 ? 0 : decimals;
@@ -996,11 +1127,13 @@
       const i = Math.floor(Math.log(bytes) / Math.log(k));
       return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
     }
+
     function showToast(message, type = 'info') {
       const toast = document.getElementById('toast');
+      const icon = document.getElementById('toastIcon');
+      toast.className = `toast show ${type}`;
       document.getElementById('toastMsg').textContent = message;
-      document.getElementById('toastIcon').className = type === 'success' ? 'fa-solid fa-circle-check' : (type === 'warning' ? 'fa-solid fa-triangle-exclamation' : 'fa-solid fa-circle-info');
-      toast.className = `toast ${type} show`;
+      icon.className = type === 'success' ? 'fa-solid fa-circle-check' : type === 'warning' ? 'fa-solid fa-exclamation-triangle' : 'fa-solid fa-circle-info';
       setTimeout(() => toast.classList.remove('show'), 4000);
     }
   </script>
